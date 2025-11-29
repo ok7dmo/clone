@@ -30,8 +30,10 @@ Python aplikace s grafickým rozhraním Qt pro čtení a ovládání radiostanic
 - 🔌 **Automatická detekce COM portů** (Windows i Linux)
 - 📡 **Radioamatérská pásma ČR** - rychlý přístup k běžným frekvencím (160m až 70cm)
 - 💾 **Klonování pamětí** - vyčtení pamětí pomocí Clone Mode protokolu (podle CHIRP)
-- 💿 **Uložení/načtení clone souborů** - backup a obnovení konfigurace (7341 bajtů)
-- 📊 **Progress bar** při čtení pamětí (13 bloků s checksum ověřováním)
+- 🌍 **Podpora obou verzí** - Standard (EU) i US (FT-897D s 60m kanály)
+- 🔍 **Auto-detekce modelu** - rozpozná verzi podle velikosti dat
+- 💿 **Uložení/načtení clone souborů** - backup a obnovení konfigurace
+- 📊 **Progress bar** při čtení pamětí s checksum ověřováním
 - ✅ **Blokový protokol** s ACK potvrzováním a kontrolními součty
 
 ## Požadavky
@@ -90,7 +92,12 @@ python3 ft897_reader.py
    - Ostatní možnosti: 9600, 38400
    - Ujistěte se, že rychlost odpovídá nastavení v menu radiostanice
 
-3. **Klikněte na "Připojit"**
+3. **Vyberte model radiostanice:**
+   - **Standard (EU)** - 7341 B: Evropská verze bez 60m pásma
+   - **US (FT-897D)** - 7481 B (+60m): Americká verze s 60m kanály
+   - Při klonování aplikace auto-detekuje správný model
+
+4. **Klikněte na "Připojit"**
 
 ### Použití menu funkcí:
 
@@ -170,11 +177,16 @@ Aplikace implementuje **blokový clone protokol** použitý v CHIRP pro FT-817/8
 
 **Parametry:**
 - **Rychlost:** Vždy 9600 baud (automaticky přepnuto)
-- **Velikost dat:** 7341 bajtů (US model: 7481 bajtů)
-- **Struktura:** 13 bloků různých velikostí
 - **Formát bloku:** `[číslo_bloku][data][checksum]`
 - **Potvrzování:** ACK (0x06) po každém bloku
 - **Checksum:** Yaesu checksum (součet bajtů & 0xFF)
+
+**Verze rádia:**
+
+| Verze | Velikost | Bloky | Obsah navíc |
+|-------|----------|-------|-------------|
+| **Standard (EU)** | 7341 bajtů | 13 | - |
+| **US (FT-897D)** | 7481 bajtů | 14 | 60-meter kanály (5 kanálů) |
 
 **Obsah clone dat:**
 - Paměťové kanály (200 regulárních + 10 PMS)
@@ -182,6 +194,7 @@ Aplikace implementuje **blokový clone protokol** použitý v CHIRP pro FT-817/8
 - Visibility a Filled bitmapy
 - ARTS ID, beacon text
 - Kompletní nastavení radiostanice
+- **US verze:** Navíc 5 kanálů pro 60m pásmo (5.3-5.4 MHz)
 
 **Zdroj implementace:** [CHIRP ft857.py driver](https://github.com/AsavarTzeth/chirp/blob/master/chirp/drivers/ft857.py)
 

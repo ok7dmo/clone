@@ -79,9 +79,14 @@ class FT897:
     CMD_ACK = 0x06  # ACK pro clone protokol
 
     # FT-897 Memory blocks (podle CHIRP ft857.py)
-    # Celková velikost: 7341 bajtů (US model: 7481 bajtů)
-    BLOCK_LENGTHS = [2, 82, 252, 196, 252, 196, 212, 55, 140, 140, 140, 38, 176]
-    CLONE_MEM_SIZE = 7341  # Standard model
+    # Standard model (EU): 7341 bajtů, 13 bloků
+    BLOCK_LENGTHS_STANDARD = [2, 82, 252, 196, 252, 196, 212, 55, 140, 140, 140, 38, 176]
+    CLONE_MEM_SIZE_STANDARD = 7341
+
+    # US model (FT-897D): 7481 bajtů, 14 bloků (navíc 60-meter kanály)
+    BLOCK_LENGTHS_US = [2, 82, 252, 196, 252, 196, 212, 55, 140, 140, 140, 38, 176, 140]
+    CLONE_MEM_SIZE_US = 7481
+
     CLONE_BAUD_RATE = 9600  # Clone mode vždy používá 9600 baud
 
     # Modes
@@ -102,7 +107,7 @@ class FT897:
         0x88: 'PKT'
     }
 
-    def __init__(self, port: str = '/dev/ttyUSB0', baudrate: int = 4800, timeout: float = 0.5):
+    def __init__(self, port: str = '/dev/ttyUSB0', baudrate: int = 4800, timeout: float = 0.5, is_us_model: bool = False):
         """
         Inicializace komunikace s FT-897
 
@@ -110,11 +115,21 @@ class FT897:
             port: Sériový port (např. '/dev/ttyUSB0' nebo 'COM3')
             baudrate: Rychlost komunikace (4800, 9600, nebo 38400)
             timeout: Timeout pro čtení v sekundách
+            is_us_model: True pro US verzi (FT-897D s 60m kanály), False pro EU standard
         """
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
         self.serial: Optional[serial.Serial] = None
+        self.is_us_model = is_us_model
+
+        # Nastavit správné bloky a velikost podle modelu
+        if self.is_us_model:
+            self.block_lengths = self.BLOCK_LENGTHS_US
+            self.clone_mem_size = self.CLONE_MEM_SIZE_US
+        else:
+            self.block_lengths = self.BLOCK_LENGTHS_STANDARD
+            self.clone_mem_size = self.CLONE_MEM_SIZE_STANDARD
 
     @staticmethod
     def list_available_ports() -> List[Tuple[str, str]]:
@@ -423,7 +438,9 @@ class FT897:
             progress_callback: Volitelná funkce která se volá s progresem (0-100)
 
         Returns:
-            Bajty s kompletním obsahem paměti (7341 bajtů) nebo None při chybě
+            Bajty s kompletním obsahem paměti nebo None při chybě
+            - Standard model (EU): 7341 bajtů (13 bloků)
+            - US model (FT-897D): 7481 bajtů (14 bloků, včetně 60m kanálů)
         """
         # Pro klonování potřebujeme přepnout na 9600 baud
         original_baudrate = self.baudrate
@@ -450,9 +467,9 @@ class FT897:
             # Čtení bloků podle CHIRP protokolu
             block_num = 0
             pos = 0
-            total_blocks = len(self.BLOCK_LENGTHS)
+            total_blocks = len(self.block_lengths)
 
-            for block_idx, block_size in enumerate(self.BLOCK_LENGTHS):
+            for block_idx, block_size in enumerate(self.block_lengths):
                 # První blok má delší timeout a více pokusů
                 max_attempts = 60 if block_idx == 0 else 5
                 retry_delay = 0.5

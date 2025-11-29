@@ -9,7 +9,8 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QLabel, QPushButton, QLineEdit, QComboBox,
     QGroupBox, QMessageBox, QProgressBar, QStatusBar, QMenuBar,
-    QMenu, QAction, QFileDialog, QDialog, QDialogButtonBox, QTextEdit
+    QMenu, QAction, QFileDialog, QDialog, QDialogButtonBox, QTextEdit,
+    QRadioButton, QButtonGroup
 )
 from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtGui import QFont, QPalette, QColor
@@ -187,35 +188,58 @@ class FT897ReaderGUI(QMainWindow):
     def create_connection_group(self) -> QGroupBox:
         """Vytvoří sekci pro připojení k radiostanici"""
         group = QGroupBox('Připojení k radiostanici')
-        layout = QHBoxLayout()
+        main_layout = QVBoxLayout()
+
+        # První řádek - port a baudrate
+        top_layout = QHBoxLayout()
 
         # Port - nyní jako ComboBox s automatickou detekcí portů
-        layout.addWidget(QLabel('Port:'))
+        top_layout.addWidget(QLabel('Port:'))
         self.port_combo = QComboBox()
         self.port_combo.setMinimumWidth(200)
         self.refresh_ports()
-        layout.addWidget(self.port_combo)
+        top_layout.addWidget(self.port_combo)
 
         # Tlačítko pro refresh portů
         refresh_button = QPushButton('🔄 Obnovit')
         refresh_button.clicked.connect(self.refresh_ports)
         refresh_button.setMaximumWidth(80)
-        layout.addWidget(refresh_button)
+        top_layout.addWidget(refresh_button)
 
         # Baudrate
-        layout.addWidget(QLabel('Rychlost:'))
+        top_layout.addWidget(QLabel('Rychlost:'))
         self.baudrate_combo = QComboBox()
         self.baudrate_combo.addItems(['4800', '9600', '38400'])
         self.baudrate_combo.setCurrentText('4800')
-        layout.addWidget(self.baudrate_combo)
+        top_layout.addWidget(self.baudrate_combo)
 
         # Tlačítko připojení
         self.connect_button = QPushButton('Připojit')
         self.connect_button.clicked.connect(self.toggle_connection)
-        layout.addWidget(self.connect_button)
+        top_layout.addWidget(self.connect_button)
 
-        layout.addStretch()
-        group.setLayout(layout)
+        top_layout.addStretch()
+        main_layout.addLayout(top_layout)
+
+        # Druhý řádek - výběr modelu
+        model_layout = QHBoxLayout()
+        model_layout.addWidget(QLabel('Model:'))
+
+        self.model_button_group = QButtonGroup()
+
+        self.model_standard_radio = QRadioButton('Standard (EU) - 7341 B')
+        self.model_standard_radio.setChecked(True)
+        self.model_button_group.addButton(self.model_standard_radio)
+        model_layout.addWidget(self.model_standard_radio)
+
+        self.model_us_radio = QRadioButton('US (FT-897D) - 7481 B (+60m)')
+        self.model_button_group.addButton(self.model_us_radio)
+        model_layout.addWidget(self.model_us_radio)
+
+        model_layout.addStretch()
+        main_layout.addLayout(model_layout)
+
+        group.setLayout(main_layout)
         return group
 
     def refresh_ports(self):
@@ -395,8 +419,9 @@ class FT897ReaderGUI(QMainWindow):
                 return
 
             baudrate = int(self.baudrate_combo.currentText())
+            is_us_model = self.model_us_radio.isChecked()
 
-            self.radio = FT897(port=port, baudrate=baudrate)
+            self.radio = FT897(port=port, baudrate=baudrate, is_us_model=is_us_model)
 
             if self.radio.connect():
                 self.connected = True
@@ -682,14 +707,21 @@ class FT897ReaderGUI(QMainWindow):
         dialog.setModal(True)
         layout = QVBoxLayout()
 
+        # Zjistit vybraný model
+        is_us_model = self.model_us_radio.isChecked()
+        expected_size = 7481 if is_us_model else 7341
+        num_blocks = 14 if is_us_model else 13
+        model_name = "US (FT-897D)" if is_us_model else "Standard (EU)"
+
         info_label = QLabel(
-            '<b>Čekám na data z radiostanice...</b><br><br>'
-            'Stiskněte tlačítko <b>[C](SEND)</b> na radiostanici!<br><br>'
-            'Clone protokol (podle CHIRP):<br>'
-            '• Bloková struktura: 13 bloků<br>'
-            '• Celková velikost: 7341 bajtů<br>'
-            '• Rychlost: 9600 baud<br>'
-            '• Ověřování: checksum + ACK'
+            f'<b>Čekám na data z radiostanice...</b><br><br>'
+            f'Stiskněte tlačítko <b>[C](SEND)</b> na radiostanici!<br><br>'
+            f'Clone protokol (podle CHIRP):<br>'
+            f'• Model: <b>{model_name}</b><br>'
+            f'• Bloková struktura: {num_blocks} bloků<br>'
+            f'• Celková velikost: {expected_size} bajtů<br>'
+            f'• Rychlost: 9600 baud<br>'
+            f'• Ověřování: checksum + ACK'
         )
         info_label.setTextFormat(Qt.RichText)
         layout.addWidget(info_label)
@@ -716,26 +748,58 @@ class FT897ReaderGUI(QMainWindow):
         self.clone_data = self.radio.clone_memory(progress_callback=update_progress)
 
         if self.clone_data:
-            expected_size = 7341  # Standard FT-897
             success_msg = QMessageBox(self)
             success_msg.setWindowTitle('Clone dokončen')
             success_msg.setIcon(QMessageBox.Information)
             success_msg.setText('<b>Paměti byly úspěšně vyčteny!</b>')
 
-            if len(self.clone_data) == expected_size:
+            actual_size = len(self.clone_data)
+
+            # Auto-detekce modelu podle velikosti
+            if actual_size == 7341:
+                detected_model = "Standard (EU)"
+                is_complete = True
+            elif actual_size == 7481:
+                detected_model = "US (FT-897D) s 60m kanály"
+                is_complete = True
+            else:
+                detected_model = "Neznámý"
+                is_complete = False
+
+            if is_complete:
+                extra_info = ""
+                if actual_size == 7481:
+                    extra_info = "<br>• 60-meter kanály (5 kanálů, US verze)"
+
                 success_msg.setInformativeText(
-                    f'✓ Načteno: <b>{len(self.clone_data)} bajtů</b> (kompletní clone)<br><br>'
+                    f'✓ Načteno: <b>{actual_size} bajtů</b> (kompletní clone)<br>'
+                    f'✓ Detekovaný model: <b>{detected_model}</b><br><br>'
                     f'Clone soubor obsahuje:<br>'
                     f'• Všechny paměťové kanály (200 + 10 PMS)<br>'
                     f'• VFO A/B, HOME, QMB konfigurace<br>'
-                    f'• Kompletní nastavení radiostanice<br><br>'
+                    f'• Kompletní nastavení radiostanice{extra_info}<br><br>'
                     f'<i>Použijte menu Soubor → Uložit clone soubor pro zálohování.</i>'
                 )
+
+                # Pokud je detekovaný model jiný než vybraný, upozornit uživatele
+                if (actual_size == 7481 and not is_us_model) or (actual_size == 7341 and is_us_model):
+                    success_msg.setIcon(QMessageBox.Warning)
+                    success_msg.setInformativeText(
+                        success_msg.informativeText() +
+                        f'<br><br>⚠ <b>UPOZORNĚNÍ:</b> Vybrali jste {model_name}, '
+                        f'ale radiostanice odeslala {actual_size} bajtů ({detected_model}).<br>'
+                        f'Doporučujeme změnit výběr modelu v GUI na správný.'
+                    )
             else:
+                success_msg.setIcon(QMessageBox.Warning)
                 success_msg.setInformativeText(
-                    f'⚠ Načteno: <b>{len(self.clone_data)} bajtů</b><br>'
-                    f'(očekáváno {expected_size} bajtů)<br><br>'
-                    f'Data mohou být neúplná. Zkuste clone zopakovat.'
+                    f'⚠ Načteno: <b>{actual_size} bajtů</b><br>'
+                    f'(očekáváno 7341 nebo 7481 bajtů)<br><br>'
+                    f'Data mohou být neúplná nebo poškozená.<br>'
+                    f'Zkuste clone zopakovat a ujistěte se, že:<br>'
+                    f'• Radiostanice je správně v Clone Mode<br>'
+                    f'• Stiskli jste [C](SEND) včas<br>'
+                    f'• Kabel je správně připojen'
                 )
             success_msg.exec_()
         else:
