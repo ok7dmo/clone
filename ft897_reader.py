@@ -655,18 +655,43 @@ class FT897ReaderGUI(QMainWindow):
             )
             return
 
+        # Zobrazit instrukce pro vstup do clone mode
+        instructions = QMessageBox(self)
+        instructions.setWindowTitle('Příprava Clone Mode')
+        instructions.setIcon(QMessageBox.Information)
+        instructions.setText('<b>Postup pro vstup do Clone Mode:</b>')
+        instructions.setInformativeText(
+            '1. <b>VYPNĚTE</b> radiostanici<br>'
+            '2. Ujistěte se, že kabel je připojen k <b>CAT/LINEAR</b> konektoru<br>'
+            '3. Držte tlačítka <b>[MODE &lt;]</b> a <b>[MODE &gt;]</b><br>'
+            '4. Zapněte radiostanici (stále držte tlačítka)<br>'
+            '5. Na displeji se objeví <b>"CLONE MODE"</b><br>'
+            '6. Uvolněte tlačítka<br>'
+            '7. Klikněte <b>OK</b> v tomto okně<br>'
+            '8. Během 30 sekund stiskněte <b>[C](SEND)</b> na radiostanici<br><br>'
+            '<i>Radiostanice začne odesílat data...</i>'
+        )
+        instructions.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+
+        if instructions.exec_() != QMessageBox.Ok:
+            return
+
         # Dialog s informacemi a progress barem
         dialog = QDialog(self)
-        dialog.setWindowTitle('Čtení pamětí')
+        dialog.setWindowTitle('Clone Mode - Čtení pamětí')
         dialog.setModal(True)
         layout = QVBoxLayout()
 
         info_label = QLabel(
-            'Vyčítám paměti z radiostanice...\n\n'
-            'POZNÁMKA: Tato operace používá 0xBB příkaz pro čtení EEPROM.\n'
-            'Rychlost bude přepnuta na 9600 baud.\n'
-            'Proces může trvat několik minut.'
+            '<b>Čekám na data z radiostanice...</b><br><br>'
+            'Stiskněte tlačítko <b>[C](SEND)</b> na radiostanici!<br><br>'
+            'Clone protokol (podle CHIRP):<br>'
+            '• Bloková struktura: 13 bloků<br>'
+            '• Celková velikost: 7341 bajtů<br>'
+            '• Rychlost: 9600 baud<br>'
+            '• Ověřování: checksum + ACK'
         )
+        info_label.setTextFormat(Qt.RichText)
         layout.addWidget(info_label)
 
         progress = QProgressBar()
@@ -691,19 +716,39 @@ class FT897ReaderGUI(QMainWindow):
         self.clone_data = self.radio.clone_memory(progress_callback=update_progress)
 
         if self.clone_data:
-            QMessageBox.information(
-                self,
-                'Hotovo',
-                f'Paměti byly úspěšně vyčteny!\n'
-                f'Načteno: {len(self.clone_data)} bajtů\n\n'
-                f'Použijte menu Soubor → Uložit clone soubor pro uložení dat.'
-            )
+            expected_size = 7341  # Standard FT-897
+            success_msg = QMessageBox(self)
+            success_msg.setWindowTitle('Clone dokončen')
+            success_msg.setIcon(QMessageBox.Information)
+            success_msg.setText('<b>Paměti byly úspěšně vyčteny!</b>')
+
+            if len(self.clone_data) == expected_size:
+                success_msg.setInformativeText(
+                    f'✓ Načteno: <b>{len(self.clone_data)} bajtů</b> (kompletní clone)<br><br>'
+                    f'Clone soubor obsahuje:<br>'
+                    f'• Všechny paměťové kanály (200 + 10 PMS)<br>'
+                    f'• VFO A/B, HOME, QMB konfigurace<br>'
+                    f'• Kompletní nastavení radiostanice<br><br>'
+                    f'<i>Použijte menu Soubor → Uložit clone soubor pro zálohování.</i>'
+                )
+            else:
+                success_msg.setInformativeText(
+                    f'⚠ Načteno: <b>{len(self.clone_data)} bajtů</b><br>'
+                    f'(očekáváno {expected_size} bajtů)<br><br>'
+                    f'Data mohou být neúplná. Zkuste clone zopakovat.'
+                )
+            success_msg.exec_()
         else:
             QMessageBox.critical(
                 self,
                 'Chyba',
-                'Chyba při čtení pamětí z radiostanice.\n'
-                'Zkontrolujte připojení a zkuste to znovu.'
+                '<b>Chyba při čtení pamětí z radiostanice.</b><br><br>'
+                'Možné příčiny:<br>'
+                '• Radiostanice není v Clone Mode<br>'
+                '• Nestiskli jste [C](SEND) během 30 sekund<br>'
+                '• Špatné připojení kabelu<br>'
+                '• Rychlost není 9600 baud<br><br>'
+                '<i>Zkontrolujte připojení a zkuste to znovu.</i>'
             )
 
         dialog.close()

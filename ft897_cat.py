@@ -9,6 +9,41 @@ import time
 from typing import Optional, Tuple, List
 
 
+class YaesuChecksum:
+    """Třída pro výpočet Yaesu checksumu pro clone protokol"""
+
+    def __init__(self, start: int, end: int):
+        self.start = start
+        self.end = end
+
+    def get_calculated(self, data: bytes) -> int:
+        """
+        Vypočítá checksum pro daný rozsah dat
+
+        Args:
+            data: Kompletní data
+
+        Returns:
+            Checksum jako integer
+        """
+        cs = 0
+        for byte in data[self.start:self.end + 1]:
+            cs = (cs + byte) & 0xFF
+        return cs
+
+    def get_existing(self, data: bytes) -> int:
+        """
+        Vrátí existující checksum z dat (poslední bajt)
+
+        Args:
+            data: Data včetně checksumu
+
+        Returns:
+            Existující checksum
+        """
+        return data[-1] if isinstance(data[-1], int) else ord(data[-1])
+
+
 class FT897:
     """Třída pro komunikaci s radiostanicí Yaesu FT-897 pomocí CAT protokolu"""
 
@@ -39,6 +74,15 @@ class FT897:
     CMD_READ_TX_METERING = 0xBD
     CMD_READ_RX_STATUS_FLAGS = 0xFA
     CMD_READ_EEPROM = 0xBB  # Čtení EEPROM (2 bajty najednou)
+
+    # Clone Mode Protocol
+    CMD_ACK = 0x06  # ACK pro clone protokol
+
+    # FT-897 Memory blocks (podle CHIRP ft857.py)
+    # Celková velikost: 7341 bajtů (US model: 7481 bajtů)
+    BLOCK_LENGTHS = [2, 82, 252, 196, 252, 196, 212, 55, 140, 140, 140, 38, 176]
+    CLONE_MEM_SIZE = 7341  # Standard model
+    CLONE_BAUD_RATE = 9600  # Clone mode vždy používá 9600 baud
 
     # Modes
     MODES = {
@@ -362,20 +406,28 @@ class FT897:
 
     def clone_memory(self, progress_callback=None) -> Optional[bytes]:
         """
-        Vyčte kompletní paměť z radiostanice (clone mode)
+        Vyčte kompletní paměť z radiostanice pomocí clone módu (blokový protokol)
 
-        POZNÁMKA: Radiostanice musí být manuálně přepnuta do clone módu!
-        Stiskněte tlačítko C (CLONE) při zapínání radiostanice.
+        DŮLEŽITÉ POKYNY:
+        1. Vypněte radiostanici
+        2. Připojte kabel k CAT/LINEAR konektoru
+        3. Držte tlačítka [MODE <] a [MODE >] při zapínání
+        4. Na displeji se objeví "CLONE MODE"
+        5. Spusťte tuto funkci (klikněte OK v aplikaci)
+        6. Stiskněte tlačítko [C](SEND) na radiostanici
+        7. Radiostanice začne odesílat data
+
         Clone mode pracuje VŽDY na 9600 baud.
 
         Args:
             progress_callback: Volitelná funkce která se volá s progresem (0-100)
 
         Returns:
-            Bajty s kompletním obsahem paměti nebo None při chybě
+            Bajty s kompletním obsahem paměti (7341 bajtů) nebo None při chybě
         """
         # Pro klonování potřebujeme přepnout na 9600 baud
         original_baudrate = self.baudrate
+        original_timeout = self.timeout
         clone_data = bytearray()
 
         try:
@@ -383,44 +435,107 @@ class FT897:
             if self.serial and self.serial.is_open:
                 self.disconnect()
 
-            self.baudrate = 9600
+            self.baudrate = self.CLONE_BAUD_RATE
+            self.timeout = 2.0  # Delší timeout pro clone mode
+
             if not self.connect():
                 print("Chyba: Nelze se připojit na 9600 baud pro clone mode")
                 self.baudrate = original_baudrate
+                self.timeout = original_timeout
                 return None
 
-            # FT-897 má EEPROM velikost přibližně 8192 bajtů (0x0000 - 0x1FFF)
-            # Čteme po 2 bajtech pomocí 0xBB příkazu
-            total_bytes = 8192
-            bytes_read = 0
+            print("Čekám na data z radiostanice...")
+            print("STISKNĚTE tlačítko [C](SEND) na radiostanici!")
 
-            for addr in range(0, total_bytes, 2):
-                data = self.read_eeprom(addr)
-                if data is None:
-                    print(f"Chyba při čtení adresy 0x{addr:04X}")
-                    return None
+            # Čtení bloků podle CHIRP protokolu
+            block_num = 0
+            pos = 0
+            total_blocks = len(self.BLOCK_LENGTHS)
 
-                clone_data.extend(data)
-                bytes_read += 2
+            for block_idx, block_size in enumerate(self.BLOCK_LENGTHS):
+                # První blok má delší timeout a více pokusů
+                max_attempts = 60 if block_idx == 0 else 5
+                retry_delay = 0.5
 
-                # Volat progress callback pokud existuje
-                if progress_callback:
-                    progress = int((bytes_read / total_bytes) * 100)
-                    progress_callback(progress)
+                for attempt in range(max_attempts):
+                    try:
+                        # Čteme blok: [block_num][data][checksum]
+                        block_data_size = block_size + 2  # +1 pro block_num, +1 pro checksum
+                        received = self.serial.read(block_data_size)
 
-                # Malá pauza mezi příkazy
+                        if len(received) != block_data_size:
+                            if attempt < max_attempts - 1:
+                                time.sleep(retry_delay)
+                                continue
+                            else:
+                                print(f"Timeout při čtení bloku {block_num}")
+                                return None
+
+                        # Ověřit číslo bloku
+                        received_block_num = received[0] if isinstance(received[0], int) else ord(received[0])
+                        if received_block_num != block_num:
+                            print(f"Nesprávné číslo bloku: očekáváno {block_num}, přijato {received_block_num}")
+                            if attempt < max_attempts - 1:
+                                time.sleep(retry_delay)
+                                continue
+                            return None
+
+                        # Extrahovat data (bez block_num a checksumu)
+                        data = received[1:-1]
+
+                        # Ověřit checksum
+                        checksum_calc = YaesuChecksum(pos, pos + block_size - 1)
+                        temp_data = clone_data + data
+                        expected_cs = checksum_calc.get_calculated(bytes(temp_data))
+                        received_cs = received[-1] if isinstance(received[-1], int) else ord(received[-1])
+
+                        if expected_cs != received_cs:
+                            print(f"Chybný checksum bloku {block_num}: očekáván 0x{expected_cs:02X}, přijat 0x{received_cs:02X}")
+                            if attempt < max_attempts - 1:
+                                time.sleep(retry_delay)
+                                continue
+                            return None
+
+                        # Blok je OK - přidat data
+                        clone_data.extend(data)
+                        pos += block_size
+
+                        # Poslat ACK
+                        self.serial.write(bytes([self.CMD_ACK]))
+                        self.serial.flush()
+
+                        # Aktualizovat progress
+                        if progress_callback:
+                            progress = int((block_idx + 1) / total_blocks * 100)
+                            progress_callback(progress)
+
+                        block_num += 1
+                        break  # Blok úspěšně přijat
+
+                    except Exception as e:
+                        print(f"Chyba při čtení bloku {block_num}, pokus {attempt + 1}: {e}")
+                        if attempt < max_attempts - 1:
+                            time.sleep(retry_delay)
+                        else:
+                            return None
+
+                # Krátká pauza mezi bloky
                 time.sleep(0.01)
 
+            print(f"Clone dokončen: přijato {len(clone_data)} bajtů")
             return bytes(clone_data)
 
         except Exception as e:
             print(f"Chyba při klonování: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
         finally:
-            # Vrátit zpět původní baudrate
+            # Vrátit zpět původní nastavení
             self.disconnect()
             self.baudrate = original_baudrate
+            self.timeout = original_timeout
 
     def set_mode(self, mode: str) -> bool:
         """

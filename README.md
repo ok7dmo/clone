@@ -29,9 +29,10 @@ Python aplikace s grafickým rozhraním Qt pro čtení a ovládání radiostanic
 ### Pokročilé funkce:
 - 🔌 **Automatická detekce COM portů** (Windows i Linux)
 - 📡 **Radioamatérská pásma ČR** - rychlý přístup k běžným frekvencím (160m až 70cm)
-- 💾 **Klonování pamětí** - vyčtení pamětí z radiostanice pomocí 0xBB EEPROM příkazu
-- 💿 **Uložení/načtení clone souborů** - backup a obnovení konfigurace
-- 📊 **Progress bar** při čtení pamětí
+- 💾 **Klonování pamětí** - vyčtení pamětí pomocí Clone Mode protokolu (podle CHIRP)
+- 💿 **Uložení/načtení clone souborů** - backup a obnovení konfigurace (7341 bajtů)
+- 📊 **Progress bar** při čtení pamětí (13 bloků s checksum ověřováním)
+- ✅ **Blokový protokol** s ACK potvrzováním a kontrolními součty
 
 ## Požadavky
 
@@ -103,9 +104,17 @@ python3 ft897_reader.py
 - Změna je okamžitá a zobrazí se na displeji
 
 #### Menu Klonování:
-- **Vyčíst paměti z radiostanice** - stáhne kompletní konfiguraci pomocí 0xBB příkazu
-- Proces může trvat několik minut (čte se 8192 bajtů)
-- Rychlost se automaticky přepne na 9600 baud
+- **Vyčíst paměti z radiostanice** - stáhne kompletní konfiguraci pomocí Clone Mode
+- **Postup vstup do Clone Mode:**
+  1. **VYPNĚTE** radiostanici
+  2. Ujistěte se, že kabel je připojen k **CAT/LINEAR** konektoru
+  3. Držte tlačítka **[MODE <]** a **[MODE >]** při zapínání
+  4. Na displeji se objeví **"CLONE MODE"**
+  5. Uvolněte tlačítka a klikněte OK v aplikaci
+  6. Během 30 sekund stiskněte **[C](SEND)** na radiostanici
+- Velikost dat: **7341 bajtů** (13 bloků)
+- Rychlost: automaticky **9600 baud**
+- Protokol podle **CHIRP** (bloky + checksum + ACK)
 - Po dokončení použijte menu Soubor → Uložit pro zálohování
 
 #### Menu Soubor:
@@ -153,9 +162,28 @@ Aplikace implementuje **CAT (Computer Aided Transceiver)** protokol firmy Yaesu 
 | Set Mode | 0x07 | Nastavení provozního módu |
 | Toggle VFO | 0x81 | Přepnutí mezi VFO A a B |
 | Lock ON/OFF | 0x00/0x80 | Zamknutí/odemknutí frekv. ovladače |
-| **Read EEPROM** | **0xBB** | **Čtení 2 bajtů z EEPROM (klonování)** |
+| Read EEPROM | 0xBB | Čtení 2 bajtů z EEPROM (CAT režim) |
 
-**Nově přidáno:** Příkaz 0xBB umožňuje čtení kompletní paměti radiostanice (8192 bajtů) pro zálohování konfigurace.
+### Clone Mode Protokol (podle CHIRP)
+
+Aplikace implementuje **blokový clone protokol** použitý v CHIRP pro FT-817/857/897:
+
+**Parametry:**
+- **Rychlost:** Vždy 9600 baud (automaticky přepnuto)
+- **Velikost dat:** 7341 bajtů (US model: 7481 bajtů)
+- **Struktura:** 13 bloků různých velikostí
+- **Formát bloku:** `[číslo_bloku][data][checksum]`
+- **Potvrzování:** ACK (0x06) po každém bloku
+- **Checksum:** Yaesu checksum (součet bajtů & 0xFF)
+
+**Obsah clone dat:**
+- Paměťové kanály (200 regulárních + 10 PMS)
+- VFO A/B, HOME, QMB konfigurace
+- Visibility a Filled bitmapy
+- ARTS ID, beacon text
+- Kompletní nastavení radiostanice
+
+**Zdroj implementace:** [CHIRP ft857.py driver](https://github.com/AsavarTzeth/chirp/blob/master/chirp/drivers/ft857.py)
 
 Kompletní dokumentaci CAT protokolu najdete v oficiálním manuálu FT-897.
 
