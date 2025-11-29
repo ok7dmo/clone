@@ -9,8 +9,8 @@ Python aplikace s grafickým rozhraním Qt pro čtení a ovládání radiostanic
 ## Funkce
 
 ### Zobrazení dat z radiostanice:
-- ✅ **Aktuální frekvence** s přesností na Hz
-- ✅ **Provozní mód** (LSB, USB, CW, FM, AM, DIG, PKT)
+- ✅ **Aktuální frekvence** - velké zobrazení (36pt) s přesností na Hz
+- ✅ **Provozní mód** - zvětšené zobrazení (24pt) (LSB, USB, CW, FM, AM, DIG, PKT)
 - ✅ **S-Meter** (síla přijímaného signálu) s grafickým ukazatelem
 - ✅ **Squelch status** (otevřený/zavřený)
 - ✅ **CTCSS/DCS** detekce
@@ -20,10 +20,18 @@ Python aplikace s grafickým rozhraním Qt pro čtení a ovládání radiostanic
 - ✅ **Split mód** indikace
 
 ### Ovládání radiostanice:
-- 🎛️ **Nastavení frekvence**
+- 🎛️ **Nastavení frekvence** - manuální nebo přes menu pásem
 - 🔄 **Přepínání VFO A/B**
 - 🔒 **Zamknutí frekvenčního ovladače**
 - ⚡ **Nastavitelná frekvence aktualizace dat** (100ms - 2000ms)
+- 📻 **Nastavení módu** přes menu (LSB, USB, CW, CW-R, AM, FM, DIG, PKT, FM-N)
+
+### Pokročilé funkce:
+- 🔌 **Automatická detekce COM portů** (Windows i Linux)
+- 📡 **Radioamatérská pásma ČR** - rychlý přístup k běžným frekvencím (160m až 70cm)
+- 💾 **Klonování pamětí** - vyčtení pamětí z radiostanice pomocí 0xBB EEPROM příkazu
+- 💿 **Uložení/načtení clone souborů** - backup a obnovení konfigurace
+- 📊 **Progress bar** při čtení pamětí
 
 ## Požadavky
 
@@ -71,10 +79,10 @@ python3 ft897_reader.py
 
 ### Připojení k radiostanici:
 
-1. **Nastavte sériový port:**
-   - Linux: `/dev/ttyUSB0`, `/dev/ttyACM0`, nebo `/dev/ttyS0`
-   - Windows: `COM1`, `COM3`, `COM4`, atd.
-   - macOS: `/dev/cu.usbserial-XXXX`
+1. **Vyberte sériový port:**
+   - Aplikace automaticky detekuje všechny dostupné COM porty
+   - Vyberte port z rozbalovacího menu
+   - Použijte tlačítko "🔄 Obnovit" pro aktualizaci seznamu portů
 
 2. **Vyberte rychlost komunikace (baudrate):**
    - Výchozí: **4800** (nejběžnější nastavení FT-897)
@@ -82,6 +90,27 @@ python3 ft897_reader.py
    - Ujistěte se, že rychlost odpovídá nastavení v menu radiostanice
 
 3. **Klikněte na "Připojit"**
+
+### Použití menu funkcí:
+
+#### Menu Pásma:
+- Rychlý přístup k běžným frekvencím na radioamatérských pásmech v ČR
+- Pásma: 160m, 80m, 40m, 30m, 20m, 17m, 15m, 12m, 10m, 6m, 2m, 70cm
+- Kliknutím na frekvenci se radiostanice automaticky naladí
+
+#### Menu Módy:
+- Přepínání provozních módů: LSB, USB, CW, CW-R, AM, FM, DIG, PKT, FM-N
+- Změna je okamžitá a zobrazí se na displeji
+
+#### Menu Klonování:
+- **Vyčíst paměti z radiostanice** - stáhne kompletní konfiguraci pomocí 0xBB příkazu
+- Proces může trvat několik minut (čte se 8192 bajtů)
+- Rychlost se automaticky přepne na 9600 baud
+- Po dokončení použijte menu Soubor → Uložit pro zálohování
+
+#### Menu Soubor:
+- **Otevřít clone soubor** - načte dříve uloženou konfiguraci
+- **Uložit clone soubor** - uloží vyčtenou konfiguraci do souboru (.ft897, .bin)
 
 ### Nastavení radiostanice FT-897:
 
@@ -121,8 +150,12 @@ Aplikace implementuje **CAT (Computer Aided Transceiver)** protokol firmy Yaesu 
 | Get RX Status | 0xE7 | Čtení S-metru a squelch statusu |
 | Get TX Status | 0xF7 | Čtení TX statusu, výkonu a SWR |
 | Set Frequency | 0x01 | Nastavení provozní frekvence |
+| Set Mode | 0x07 | Nastavení provozního módu |
 | Toggle VFO | 0x81 | Přepnutí mezi VFO A a B |
 | Lock ON/OFF | 0x00/0x80 | Zamknutí/odemknutí frekv. ovladače |
+| **Read EEPROM** | **0xBB** | **Čtení 2 bajtů z EEPROM (klonování)** |
+
+**Nově přidáno:** Příkaz 0xBB umožňuje čtení kompletní paměti radiostanice (8192 bajtů) pro zálohování konfigurace.
 
 Kompletní dokumentaci CAT protokolu najdete v oficiálním manuálu FT-897.
 
