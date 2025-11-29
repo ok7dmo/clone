@@ -4,10 +4,12 @@ FT-897 Radio Reader - GUI aplikace pro čtení a ovládání radiostanice Yaesu 
 """
 
 import sys
+import os
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QLabel, QPushButton, QLineEdit, QComboBox,
-    QGroupBox, QMessageBox, QProgressBar, QStatusBar
+    QGroupBox, QMessageBox, QProgressBar, QStatusBar, QMenuBar,
+    QMenu, QAction, QFileDialog, QDialog, QDialogButtonBox, QTextEdit
 )
 from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtGui import QFont, QPalette, QColor
@@ -28,8 +30,11 @@ class FT897ReaderGUI(QMainWindow):
 
     def init_ui(self):
         """Inicializace uživatelského rozhraní"""
-        self.setWindowTitle('FT-897 Radio Reader')
-        self.setGeometry(100, 100, 800, 600)
+        self.setWindowTitle('FT-897 Radio Reader & Controller')
+        self.setGeometry(100, 100, 900, 700)
+
+        # Menu bar
+        self.create_menu_bar()
 
         # Hlavní widget
         central_widget = QWidget()
@@ -59,16 +64,143 @@ class FT897ReaderGUI(QMainWindow):
         # Nastavení stylů
         self.apply_styles()
 
+    def create_menu_bar(self):
+        """Vytvoří menu bar s nabídkami"""
+        menubar = self.menuBar()
+
+        # Menu Soubor
+        file_menu = menubar.addMenu('&Soubor')
+
+        open_clone_action = QAction('Otevřít clone soubor...', self)
+        open_clone_action.triggered.connect(self.open_clone_file)
+        file_menu.addAction(open_clone_action)
+
+        save_clone_action = QAction('Uložit clone soubor...', self)
+        save_clone_action.triggered.connect(self.save_clone_file)
+        file_menu.addAction(save_clone_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction('&Konec', self)
+        exit_action.setShortcut('Ctrl+Q')
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # Menu Klonování
+        clone_menu = menubar.addMenu('&Klonování')
+
+        read_memory_action = QAction('Vyčíst paměti z radiostanice...', self)
+        read_memory_action.triggered.connect(self.read_memories)
+        clone_menu.addAction(read_memory_action)
+
+        # Menu Módy
+        modes_menu = menubar.addMenu('&Módy')
+        mode_list = ['LSB', 'USB', 'CW', 'CW-R', 'AM', 'FM', 'DIG', 'PKT', 'FM-N']
+        for mode in mode_list:
+            mode_action = QAction(mode, self)
+            mode_action.triggered.connect(lambda checked, m=mode: self.set_mode(m))
+            modes_menu.addAction(mode_action)
+
+        # Menu Pásma
+        bands_menu = menubar.addMenu('&Pásma')
+        self.create_bands_menu(bands_menu)
+
+        # Menu Nápověda
+        help_menu = menubar.addMenu('&Nápověda')
+
+        about_action = QAction('O aplikaci...', self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+
+    def create_bands_menu(self, parent_menu):
+        """Vytvoří podnabídky pro radioamatérská pásma ČR"""
+
+        # Definice pásem a frekvencí pro ČR
+        bands = {
+            '160m (1.8-2.0 MHz)': [
+                ('1.850 MHz (CW)', 1.850),
+                ('1.890 MHz (SSB)', 1.890),
+            ],
+            '80m (3.5-3.8 MHz)': [
+                ('3.650 MHz (CW/Digital)', 3.650),
+                ('3.700 MHz (SSB)', 3.700),
+                ('3.775 MHz (SSB)', 3.775),
+            ],
+            '40m (7.0-7.2 MHz)': [
+                ('7.050 MHz (CW/Digital)', 7.050),
+                ('7.100 MHz (SSB)', 7.100),
+                ('7.130 MHz (SSB)', 7.130),
+            ],
+            '30m (10.1-10.15 MHz)': [
+                ('10.130 MHz (CW/Digital)', 10.130),
+                ('10.140 MHz (Digital)', 10.140),
+            ],
+            '20m (14.0-14.35 MHz)': [
+                ('14.100 MHz (CW/Digital)', 14.100),
+                ('14.200 MHz (SSB)', 14.200),
+                ('14.250 MHz (SSB)', 14.250),
+            ],
+            '17m (18.068-18.168 MHz)': [
+                ('18.100 MHz (CW/Digital)', 18.100),
+                ('18.130 MHz (SSB)', 18.130),
+            ],
+            '15m (21.0-21.45 MHz)': [
+                ('21.150 MHz (CW/Digital)', 21.150),
+                ('21.250 MHz (SSB)', 21.250),
+                ('21.300 MHz (SSB)', 21.300),
+            ],
+            '12m (24.89-24.99 MHz)': [
+                ('24.930 MHz (CW/Digital)', 24.930),
+                ('24.950 MHz (SSB)', 24.950),
+            ],
+            '10m (28.0-29.7 MHz)': [
+                ('28.500 MHz (CW/Digital)', 28.500),
+                ('29.000 MHz (FM)', 29.000),
+                ('29.600 MHz (FM)', 29.600),
+            ],
+            '6m (50.0-52.0 MHz)': [
+                ('50.100 MHz (SSB)', 50.100),
+                ('50.200 MHz (SSB)', 50.200),
+                ('51.000 MHz (FM)', 51.000),
+            ],
+            '2m (144-146 MHz)': [
+                ('144.500 MHz (SSB)', 144.500),
+                ('145.200 MHz (FM)', 145.200),
+                ('145.500 MHz (FM)', 145.500),
+            ],
+            '70cm (430-440 MHz)': [
+                ('432.500 MHz (SSB)', 432.500),
+                ('433.500 MHz (FM)', 433.500),
+                ('435.000 MHz (FM)', 435.000),
+            ],
+        }
+
+        for band_name, frequencies in bands.items():
+            band_menu = parent_menu.addMenu(band_name)
+            for freq_name, freq_mhz in frequencies:
+                freq_action = QAction(freq_name, self)
+                freq_action.triggered.connect(
+                    lambda checked, f=freq_mhz: self.set_frequency_from_menu(f)
+                )
+                band_menu.addAction(freq_action)
+
     def create_connection_group(self) -> QGroupBox:
         """Vytvoří sekci pro připojení k radiostanici"""
         group = QGroupBox('Připojení k radiostanici')
         layout = QHBoxLayout()
 
-        # Port
+        # Port - nyní jako ComboBox s automatickou detekcí portů
         layout.addWidget(QLabel('Port:'))
-        self.port_input = QLineEdit('/dev/ttyUSB0')
-        self.port_input.setPlaceholderText('např. /dev/ttyUSB0 nebo COM3')
-        layout.addWidget(self.port_input)
+        self.port_combo = QComboBox()
+        self.port_combo.setMinimumWidth(200)
+        self.refresh_ports()
+        layout.addWidget(self.port_combo)
+
+        # Tlačítko pro refresh portů
+        refresh_button = QPushButton('🔄 Obnovit')
+        refresh_button.clicked.connect(self.refresh_ports)
+        refresh_button.setMaximumWidth(80)
+        layout.addWidget(refresh_button)
 
         # Baudrate
         layout.addWidget(QLabel('Rychlost:'))
@@ -86,22 +218,35 @@ class FT897ReaderGUI(QMainWindow):
         group.setLayout(layout)
         return group
 
+    def refresh_ports(self):
+        """Obnoví seznam dostupných portů"""
+        self.port_combo.clear()
+        ports = FT897.list_available_ports()
+
+        if not ports:
+            self.port_combo.addItem("Žádné porty nenalezeny")
+        else:
+            for port_name, port_desc in ports:
+                self.port_combo.addItem(port_desc, port_name)
+
     def create_display_group(self) -> QGroupBox:
         """Vytvoří sekci pro zobrazení dat z radiostanice"""
         group = QGroupBox('Aktuální stav radiostanice')
         layout = QGridLayout()
 
-        # Frekvence
+        # Frekvence - VELKÉ zobrazení
         layout.addWidget(QLabel('Frekvence:'), 0, 0)
         self.freq_label = QLabel('---')
-        self.freq_label.setFont(QFont('Monospace', 24, QFont.Bold))
-        self.freq_label.setStyleSheet('color: #00FF00; background-color: #000000; padding: 10px;')
+        self.freq_label.setFont(QFont('Monospace', 36, QFont.Bold))
+        self.freq_label.setStyleSheet('color: #00FF00; background-color: #000000; padding: 15px; border: 2px solid #00FF00;')
+        self.freq_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.freq_label, 0, 1, 1, 3)
 
-        # Mód
+        # Mód - větší zobrazení
         layout.addWidget(QLabel('Mód:'), 1, 0)
         self.mode_label = QLabel('---')
-        self.mode_label.setFont(QFont('Arial', 16, QFont.Bold))
+        self.mode_label.setFont(QFont('Arial', 24, QFont.Bold))
+        self.mode_label.setStyleSheet('color: #0099FF; padding: 5px;')
         layout.addWidget(self.mode_label, 1, 1)
 
         # S-meter
@@ -240,7 +385,15 @@ class FT897ReaderGUI(QMainWindow):
         """Připojí nebo odpojí radiostanici"""
         if not self.connected:
             # Připojení
-            port = self.port_input.text()
+            port = self.port_combo.currentData()
+            if not port:
+                QMessageBox.warning(
+                    self,
+                    'Chyba',
+                    'Vyberte platný sériový port'
+                )
+                return
+
             baudrate = int(self.baudrate_combo.currentText())
 
             self.radio = FT897(port=port, baudrate=baudrate)
@@ -431,6 +584,200 @@ class FT897ReaderGUI(QMainWindow):
             if self.radio:
                 self.radio.disconnect()
         event.accept()
+
+    # Menu callbacks
+
+    def open_clone_file(self):
+        """Otevře clone soubor"""
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            'Otevřít clone soubor',
+            '',
+            'Clone soubory (*.ft897 *.bin);;Všechny soubory (*.*)'
+        )
+
+        if filename:
+            try:
+                with open(filename, 'rb') as f:
+                    data = f.read()
+                QMessageBox.information(
+                    self,
+                    'Clone soubor načten',
+                    f'Načteno {len(data)} bajtů z {os.path.basename(filename)}'
+                )
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    'Chyba',
+                    f'Nelze otevřít soubor:\n{str(e)}'
+                )
+
+    def save_clone_file(self):
+        """Uloží clone data do souboru"""
+        if not hasattr(self, 'clone_data') or not self.clone_data:
+            QMessageBox.warning(
+                self,
+                'Žádná data',
+                'Nejprve vyčtěte paměti z radiostanice pomocí menu Klonování.'
+            )
+            return
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            'Uložit clone soubor',
+            'ft897_clone.bin',
+            'Clone soubory (*.ft897 *.bin);;Všechny soubory (*.*)'
+        )
+
+        if filename:
+            try:
+                with open(filename, 'wb') as f:
+                    f.write(self.clone_data)
+                QMessageBox.information(
+                    self,
+                    'Uloženo',
+                    f'Clone data ({len(self.clone_data)} bajtů) byla uložena do:\n{filename}'
+                )
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    'Chyba',
+                    f'Nelze uložit soubor:\n{str(e)}'
+                )
+
+    def read_memories(self):
+        """Vyčte paměti z radiostanice"""
+        if not self.connected:
+            QMessageBox.warning(
+                self,
+                'Nepřipojeno',
+                'Nejprve se připojte k radiostanici.'
+            )
+            return
+
+        # Dialog s informacemi a progress barem
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Čtení pamětí')
+        dialog.setModal(True)
+        layout = QVBoxLayout()
+
+        info_label = QLabel(
+            'Vyčítám paměti z radiostanice...\n\n'
+            'POZNÁMKA: Tato operace používá 0xBB příkaz pro čtení EEPROM.\n'
+            'Rychlost bude přepnuta na 9600 baud.\n'
+            'Proces může trvat několik minut.'
+        )
+        layout.addWidget(info_label)
+
+        progress = QProgressBar()
+        progress.setRange(0, 100)
+        progress.setValue(0)
+        layout.addWidget(progress)
+
+        status_label = QLabel('Zahajuji čtení...')
+        layout.addWidget(status_label)
+
+        dialog.setLayout(layout)
+        dialog.setMinimumWidth(400)
+        dialog.show()
+
+        # Callback pro aktualizaci progressu
+        def update_progress(percent):
+            progress.setValue(percent)
+            status_label.setText(f'Přečteno: {percent}%')
+            QApplication.processEvents()
+
+        # Spustit klonování
+        self.clone_data = self.radio.clone_memory(progress_callback=update_progress)
+
+        if self.clone_data:
+            QMessageBox.information(
+                self,
+                'Hotovo',
+                f'Paměti byly úspěšně vyčteny!\n'
+                f'Načteno: {len(self.clone_data)} bajtů\n\n'
+                f'Použijte menu Soubor → Uložit clone soubor pro uložení dat.'
+            )
+        else:
+            QMessageBox.critical(
+                self,
+                'Chyba',
+                'Chyba při čtení pamětí z radiostanice.\n'
+                'Zkontrolujte připojení a zkuste to znovu.'
+            )
+
+        dialog.close()
+
+        # Znovu připojit na původní baudrate
+        if self.radio:
+            self.toggle_connection()  # Odpojit
+            self.toggle_connection()  # Znovu připojit
+
+    def set_mode(self, mode: str):
+        """Nastaví mód z menu"""
+        if not self.connected:
+            QMessageBox.warning(
+                self,
+                'Nepřipojeno',
+                'Nejprve se připojte k radiostanici.'
+            )
+            return
+
+        if self.radio.set_mode(mode):
+            self.status_bar.showMessage(f'Mód nastaven na {mode}', 3000)
+            # Okamžitá aktualizace
+            self.update_radio_data()
+        else:
+            QMessageBox.warning(self, 'Chyba', f'Nelze nastavit mód {mode}')
+
+    def set_frequency_from_menu(self, freq_mhz: float):
+        """Nastaví frekvenci z menu pásem"""
+        if not self.connected:
+            QMessageBox.warning(
+                self,
+                'Nepřipojeno',
+                'Nejprve se připojte k radiostanici.'
+            )
+            return
+
+        freq_hz = freq_mhz * 1_000_000.0
+
+        if self.radio.set_frequency(freq_hz):
+            self.status_bar.showMessage(f'Frekvence nastavena na {freq_mhz} MHz', 3000)
+            # Okamžitá aktualizace
+            self.update_radio_data()
+        else:
+            QMessageBox.warning(self, 'Chyba', 'Nelze nastavit frekvenci')
+
+    def show_about(self):
+        """Zobrazí dialog O aplikaci"""
+        about_text = """
+        <h2>FT-897 Radio Reader & Controller</h2>
+        <p><b>Verze:</b> 2.0</p>
+        <p><b>Popis:</b> Aplikace pro čtení, ovládání a klonování radiostanice Yaesu FT-897</p>
+
+        <h3>Funkce:</h3>
+        <ul>
+            <li>Zobrazení aktuální frekvence a módu</li>
+            <li>Monitoring S-metru, výkonu a dalších parametrů</li>
+            <li>Nastavení frekvence a módu</li>
+            <li>Rychlý přístup k radioamatérským pásmům (ČR)</li>
+            <li>Klonování pamětí z radiostanice (0xBB příkaz)</li>
+            <li>Automatická detekce COM portů (Windows/Linux)</li>
+        </ul>
+
+        <h3>CAT Protokol:</h3>
+        <p>Používá CAT protokol Yaesu pro komunikaci s FT-897</p>
+        <p>Podporované rychlosti: 4800, 9600, 38400 baud</p>
+
+        <p><b>73!</b> 📻</p>
+        """
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle('O aplikaci')
+        msg_box.setTextFormat(Qt.RichText)
+        msg_box.setText(about_text)
+        msg_box.exec_()
 
 
 def main():

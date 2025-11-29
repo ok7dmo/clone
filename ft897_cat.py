@@ -4,8 +4,9 @@ Komunikace s radiostanicí Yaesu FT-897 přes sériový port
 """
 
 import serial
+import serial.tools.list_ports
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 
 class FT897:
@@ -37,6 +38,7 @@ class FT897:
     CMD_GET_TX_STATUS = 0xF7
     CMD_READ_TX_METERING = 0xBD
     CMD_READ_RX_STATUS_FLAGS = 0xFA
+    CMD_READ_EEPROM = 0xBB  # Čtení EEPROM (2 bajty najednou)
 
     # Modes
     MODES = {
@@ -69,6 +71,19 @@ class FT897:
         self.baudrate = baudrate
         self.timeout = timeout
         self.serial: Optional[serial.Serial] = None
+
+    @staticmethod
+    def list_available_ports() -> List[Tuple[str, str]]:
+        """
+        Vrátí seznam všech dostupných sériových portů
+
+        Returns:
+            Seznam tuple (port_name, popis)
+        """
+        ports = []
+        for port in serial.tools.list_ports.comports():
+            ports.append((port.device, f"{port.device} - {port.description}"))
+        return ports
 
     def connect(self) -> bool:
         """
@@ -320,4 +335,110 @@ class FT897:
         else:
             cmd = bytes([0x00, 0x00, 0x00, 0x00, self.CMD_LOCK_OFF])
 
+        return self._send_command(cmd)
+
+    def read_eeprom(self, address: int) -> Optional[bytes]:
+        """
+        Přečte 2 bajty z EEPROM na zadané adrese (0xBB příkaz)
+
+        Args:
+            address: 16-bitová adresa v EEPROM (0x0000 - 0xFFFF)
+
+        Returns:
+            2 bajty dat nebo None při chybě
+        """
+        # Rozdělit adresu na high a low byte
+        addr_high = (address >> 8) & 0xFF
+        addr_low = address & 0xFF
+
+        cmd = bytes([addr_high, addr_low, 0x00, 0x00, self.CMD_READ_EEPROM])
+
+        if not self._send_command(cmd):
+            return None
+
+        # Přečíst 2 bajty odpovědi
+        response = self._read_response(2)
+        return response
+
+    def clone_memory(self, progress_callback=None) -> Optional[bytes]:
+        """
+        Vyčte kompletní paměť z radiostanice (clone mode)
+
+        POZNÁMKA: Radiostanice musí být manuálně přepnuta do clone módu!
+        Stiskněte tlačítko C (CLONE) při zapínání radiostanice.
+        Clone mode pracuje VŽDY na 9600 baud.
+
+        Args:
+            progress_callback: Volitelná funkce která se volá s progresem (0-100)
+
+        Returns:
+            Bajty s kompletním obsahem paměti nebo None při chybě
+        """
+        # Pro klonování potřebujeme přepnout na 9600 baud
+        original_baudrate = self.baudrate
+        clone_data = bytearray()
+
+        try:
+            # Odpojit a připojit znovu na 9600 baud pro clone mode
+            if self.serial and self.serial.is_open:
+                self.disconnect()
+
+            self.baudrate = 9600
+            if not self.connect():
+                print("Chyba: Nelze se připojit na 9600 baud pro clone mode")
+                self.baudrate = original_baudrate
+                return None
+
+            # FT-897 má EEPROM velikost přibližně 8192 bajtů (0x0000 - 0x1FFF)
+            # Čteme po 2 bajtech pomocí 0xBB příkazu
+            total_bytes = 8192
+            bytes_read = 0
+
+            for addr in range(0, total_bytes, 2):
+                data = self.read_eeprom(addr)
+                if data is None:
+                    print(f"Chyba při čtení adresy 0x{addr:04X}")
+                    return None
+
+                clone_data.extend(data)
+                bytes_read += 2
+
+                # Volat progress callback pokud existuje
+                if progress_callback:
+                    progress = int((bytes_read / total_bytes) * 100)
+                    progress_callback(progress)
+
+                # Malá pauza mezi příkazy
+                time.sleep(0.01)
+
+            return bytes(clone_data)
+
+        except Exception as e:
+            print(f"Chyba při klonování: {e}")
+            return None
+
+        finally:
+            # Vrátit zpět původní baudrate
+            self.disconnect()
+            self.baudrate = original_baudrate
+
+    def set_mode(self, mode: str) -> bool:
+        """
+        Nastaví provozní mód radiostanice
+
+        Args:
+            mode: Mód ('LSB', 'USB', 'CW', 'CW-R', 'AM', 'FM', 'DIG', 'PKT', 'FM-N')
+
+        Returns:
+            True pokud se nastavení zdařilo
+        """
+        # Převrácený slovník pro hledání módu podle názvu
+        mode_codes = {v: k for k, v in self.MODES.items() if k < 0x80}  # Jen hlavní kódy
+
+        mode_code = mode_codes.get(mode)
+        if mode_code is None:
+            print(f"Neznámý mód: {mode}")
+            return False
+
+        cmd = bytes([mode_code, 0x00, 0x00, 0x00, self.CMD_MODE_SET])
         return self._send_command(cmd)
