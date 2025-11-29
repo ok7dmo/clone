@@ -470,10 +470,11 @@ class FT897:
             total_blocks = len(self.block_lengths)
 
             for block_idx, block_size in enumerate(self.block_lengths):
-                # První blok má delší timeout a více pokusů
+                # První blok má delší timeout a více pokusů (podle CHIRP)
                 max_attempts = 60 if block_idx == 0 else 5
                 retry_delay = 0.5
 
+                block_success = False
                 for attempt in range(max_attempts):
                     try:
                         # Čteme blok: [block_num][data][checksum]
@@ -527,6 +528,7 @@ class FT897:
                             progress_callback(progress)
 
                         block_num += 1
+                        block_success = True
                         break  # Blok úspěšně přijat
 
                     except Exception as e:
@@ -536,8 +538,13 @@ class FT897:
                         else:
                             return None
 
-                # Krátká pauza mezi bloky
-                time.sleep(0.01)
+                # Pokud se blok nepodařilo načíst, vrátit chybu
+                if not block_success:
+                    print(f"Selhalo načtení bloku {block_num} po {max_attempts} pokusech")
+                    return None
+
+                # Krátká pauza mezi bloky (redukováno z 0.01 na menší hodnotu)
+                time.sleep(0.005)
 
             print(f"Clone dokončen: přijato {len(clone_data)} bajtů")
             return bytes(clone_data)

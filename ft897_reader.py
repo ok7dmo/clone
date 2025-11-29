@@ -12,9 +12,42 @@ from PyQt5.QtWidgets import (
     QMenu, QAction, QFileDialog, QDialog, QDialogButtonBox, QTextEdit,
     QRadioButton, QButtonGroup
 )
-from PyQt5.QtCore import QTimer, Qt
+from PyQt5.QtCore import QTimer, Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QPalette, QColor
 from ft897_cat import FT897
+
+
+class CloneWorker(QThread):
+    """Worker thread pro klonování pamětí z radiostanice"""
+
+    progress_updated = pyqtSignal(int)  # Signal pro aktualizaci progress baru
+    status_updated = pyqtSignal(str)  # Signal pro update statusu
+    finished = pyqtSignal(bytes)  # Signal když je hotovo (s daty)
+    error = pyqtSignal(str)  # Signal při chybě
+
+    def __init__(self, radio):
+        super().__init__()
+        self.radio = radio
+
+    def run(self):
+        """Hlavní funkce vlákna - provádí klonování"""
+        try:
+            self.status_updated.emit("Čekám na data z radiostanice...")
+
+            # Callback pro progress
+            def progress_callback(percent):
+                self.progress_updated.emit(percent)
+
+            # Spustit klonování
+            clone_data = self.radio.clone_memory(progress_callback=progress_callback)
+
+            if clone_data:
+                self.finished.emit(clone_data)
+            else:
+                self.error.emit("Nepodařilo se načíst data z radiostanice")
+
+        except Exception as e:
+            self.error.emit(f"Chyba: {str(e)}")
 
 
 class FT897ReaderGUI(QMainWindow):
@@ -738,14 +771,26 @@ class FT897ReaderGUI(QMainWindow):
         dialog.setMinimumWidth(400)
         dialog.show()
 
-        # Callback pro aktualizaci progressu
-        def update_progress(percent):
-            progress.setValue(percent)
-            status_label.setText(f'Přečteno: {percent}%')
-            QApplication.processEvents()
+        # Vytvořit worker thread pro klonování
+        self.clone_worker = CloneWorker(self.radio)
 
-        # Spustit klonování
-        self.clone_data = self.radio.clone_memory(progress_callback=update_progress)
+        # Připojit signály
+        self.clone_worker.progress_updated.connect(progress.setValue)
+        self.clone_worker.status_updated.connect(status_label.setText)
+        self.clone_worker.finished.connect(lambda data: self.on_clone_finished(data, dialog))
+        self.clone_worker.error.connect(lambda err: self.on_clone_error(err, dialog))
+
+        # Spustit worker thread
+        self.clone_worker.start()
+
+    def on_clone_finished(self, clone_data, dialog):
+        """Callback když je klonování dokončeno"""
+        self.clone_data = clone_data
+        dialog.close()
+
+        # Zjistit vybraný model
+        is_us_model = self.model_us_radio.isChecked()
+        model_name = "US (FT-897D)" if is_us_model else "Standard (EU)"
 
         if self.clone_data:
             success_msg = QMessageBox(self)
@@ -802,20 +847,28 @@ class FT897ReaderGUI(QMainWindow):
                     f'• Kabel je správně připojen'
                 )
             success_msg.exec_()
-        else:
-            QMessageBox.critical(
-                self,
-                'Chyba',
-                '<b>Chyba při čtení pamětí z radiostanice.</b><br><br>'
-                'Možné příčiny:<br>'
-                '• Radiostanice není v Clone Mode<br>'
-                '• Nestiskli jste [C](SEND) během 30 sekund<br>'
-                '• Špatné připojení kabelu<br>'
-                '• Rychlost není 9600 baud<br><br>'
-                '<i>Zkontrolujte připojení a zkuste to znovu.</i>'
-            )
 
+        # Znovu připojit na původní baudrate
+        if self.radio:
+            self.toggle_connection()  # Odpojit
+            self.toggle_connection()  # Znovu připojit
+
+    def on_clone_error(self, error_msg, dialog):
+        """Callback při chybě během klonování"""
         dialog.close()
+
+        QMessageBox.critical(
+            self,
+            'Chyba',
+            f'<b>Chyba při čtení pamětí z radiostanice.</b><br><br>'
+            f'{error_msg}<br><br>'
+            f'Možné příčiny:<br>'
+            f'• Radiostanice není v Clone Mode<br>'
+            f'• Nestiskli jste [C](SEND) během 30 sekund<br>'
+            f'• Špatné připojení kabelu<br>'
+            f'• Rychlost není 9600 baud<br><br>'
+            f'<i>Zkontrolujte připojení a zkuste to znovu.</i>'
+        )
 
         # Znovu připojit na původní baudrate
         if self.radio:
